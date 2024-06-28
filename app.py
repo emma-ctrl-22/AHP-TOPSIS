@@ -1,19 +1,37 @@
 from fastapi import FastAPI, UploadFile, File
 from fastapi.responses import JSONResponse
+from fastapi.middleware.cors import CORSMiddleware
 import pandas as pd
 import numpy as np
 from docx import Document
-import os
 import io
+import logging
 
 app = FastAPI()
+
+# Configure CORS
+origins = [
+    "http://localhost:3000",  # React app
+    "http://localhost:8000",  # API server
+]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+logging.basicConfig(level=logging.INFO)
 
 def calculate_eigenvector(matrix):
     eigenvalues, eigenvectors = np.linalg.eig(matrix)
     max_eigenvalue = np.max(eigenvalues)
     max_eigenvector = eigenvectors[:, np.argmax(eigenvalues)]
     normalized_vector = max_eigenvector / np.sum(max_eigenvector)
-    return max_eigenvalue, normalized_vector.real
+    normalized_vector = np.real_if_close(normalized_vector, tol=1e-9)
+    return max_eigenvalue, normalized_vector
 
 def calculate_consistency(matrix, max_eigenvalue):
     n = matrix.shape[0]
@@ -31,38 +49,30 @@ def geometric_mean(matrices):
 
 def create_matrices(file_content):
     data = pd.read_csv(io.StringIO(file_content), header=None)
-
-    # Skip non-numeric rows (headers)
     numeric_data = data.apply(pd.to_numeric, errors='coerce')
     numeric_data = numeric_data.dropna().reset_index(drop=True)
-
     num_engineers = numeric_data.shape[0]
-    num_sub_criteria = numeric_data.shape[1]
-
+    num_sub_criteria = int(np.sqrt(numeric_data.shape[1] * 2 + 0.25) - 0.5)
     engineer_matrices = {}
 
     for i in range(num_engineers):
         sub_criteria = numeric_data.iloc[i].values
         matrix = np.eye(num_sub_criteria)
-        
         k = 0
         for row in range(num_sub_criteria):
             for col in range(row + 1, num_sub_criteria):
                 matrix[row, col] = sub_criteria[k]
                 matrix[col, row] = 1 / sub_criteria[k]
                 k += 1
-
         engineer_matrices[f'Engineer {i + 1}'] = matrix
 
     return engineer_matrices
 
 def process_criteria(file_content):
     engineer_matrices = create_matrices(file_content)
-    
     consistent_matrices = []
     results = []
 
-    # Process each matrix
     for engineer, matrix in engineer_matrices.items():
         max_eigenvalue, weights = calculate_eigenvector(matrix)
         ci, cr, ri = calculate_consistency(matrix, max_eigenvalue)
@@ -70,22 +80,21 @@ def process_criteria(file_content):
             consistent_matrices.append(matrix)
         results.append({
             'engineer': engineer,
-            'matrix': matrix,
-            'weights': weights,
+            'matrix': matrix.tolist(),
+            'weights': weights.tolist(),
             'max_eigenvalue': max_eigenvalue,
             'ci': ci,
             'cr': cr,
             'ri': ri
         })
 
-    # Aggregate the matrices
     if consistent_matrices:
         aggregate_matrix = geometric_mean(consistent_matrices)
         max_eigenvalue, weights = calculate_eigenvector(aggregate_matrix)
         ci, cr, ri = calculate_consistency(aggregate_matrix, max_eigenvalue)
         aggregate_result = {
-            'aggregate_matrix': aggregate_matrix,
-            'weights': weights,
+            'aggregate_matrix': aggregate_matrix.tolist(),
+            'weights': weights.tolist(),
             'max_eigenvalue': max_eigenvalue,
             'ci': ci,
             'cr': cr,
@@ -128,12 +137,17 @@ async def create_upload_file(file: UploadFile = File(...)):
     try:
         content = await file.read()
         content_str = content.decode("utf-8")
-
         results, aggregate_result = process_criteria(content_str)
         doc_path = save_to_word(results, aggregate_result)
-
-        return JSONResponse(content={"message": "File processed successfully", "document": doc_path})
+        response_data = {
+            "message": "File processed successfully",
+            "document": doc_path,
+            "results": results,
+            "aggregate_result": aggregate_result
+        }
+        return JSONResponse(content=response_data)
     except Exception as e:
+        logging.error(f"Error processing file: {e}")
         return JSONResponse(content={"message": str(e)}, status_code=500)
 
 if __name__ == "__main__":
