@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import axios from 'axios';
 import jsPDF from 'jspdf';
+import { Button, CircularProgress, Paper, Table, TableBody, TableCell, TableContainer, TableHead, TableRow } from '@mui/material';
 
 function App() {
   const [files, setFiles] = useState([null]);
@@ -74,75 +75,79 @@ function App() {
   };
 
   return (
-    <div style={{ fontFamily: 'Arial, sans-serif', margin: '20px' }}>
-      <h1 style={{ textAlign: 'center', color: '#333' }}>Upload and Analyze Criteria</h1>
-      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', flexDirection: 'column' }}>
+    <div className="font-sans mx-4">
+      <h1 className="text-center text-gray-800 text-3xl my-8">Upload and Analyze Criteria</h1>
+      <div className="flex flex-col items-center">
         {files.map((file, index) => (
-          <input key={index} type="file" onChange={handleFileChange(index)} style={{ margin: '10px 0' }} />
+          <input key={index} type="file" onChange={handleFileChange(index)} className="my-2" />
         ))}
-        <button onClick={handleAddFile} style={{ padding: '10px 20px', fontSize: '16px', cursor: 'pointer', backgroundColor: '#007bff', color: '#fff', border: 'none', borderRadius: '5px' }}>
+        <Button onClick={handleAddFile} variant="contained" color="primary" className="my-2">
           Add Another File
-        </button>
-        <button onClick={handleUpload} style={{ padding: '10px 20px', fontSize: '16px', cursor: 'pointer', backgroundColor: '#007bff', color: '#fff', border: 'none', borderRadius: '5px', margin: '10px 0' }}>
+        </Button>
+        <Button onClick={handleUpload} variant="contained" color="primary" className="my-2">
           Upload Files
-        </button>
-        {loading && <p>Loading...</p>}
-        {error && <p style={{ color: 'red' }}>{error}</p>}
+        </Button>
+        {loading && <CircularProgress className="my-4" />}
+        {error && <p className="text-red-600">{error}</p>}
         {data && (
-          <div style={{ marginTop: '20px', width: '100%', maxWidth: '800px' }}>
-            <button onClick={() => setShowResults(!showResults)} style={{ padding: '10px 20px', fontSize: '16px', cursor: 'pointer', backgroundColor: '#007bff', color: '#fff', border: 'none', borderRadius: '5px' }}>
+          <div className="w-full max-w-screen-lg mt-8">
+            <Button onClick={() => setShowResults(!showResults)} variant="contained" color="primary">
               {showResults ? 'Hide Results' : 'Show Results'}
-            </button>
+            </Button>
             {showResults && (
               <div>
-                <h2>Results</h2>
+                <h2 className="text-2xl mt-4">Results</h2>
                 {data.results.map((result, index) => (
-                  <div key={index} style={{ border: '1px solid #ccc', borderRadius: '5px', padding: '10px', marginBottom: '10px' }}>
-                    <h3>{result.engineer}</h3>
+                  <Paper key={index} className="p-4 my-4">
+                    <h3 className="text-xl mb-2">{result.engineer}</h3>
                     <p><strong>Pairwise Comparison Matrix:</strong></p>
-                    <table style={{ borderCollapse: 'collapse', width: '100%' }}>
-                      <tbody>
-                        {result.matrix.map((row, rowIndex) => (
-                          <tr key={rowIndex}>
-                            {row.map((value, colIndex) => (
-                              <td key={colIndex} style={{ border: '1px solid #ccc', padding: '5px' }}>{value}</td>
-                            ))}
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                    <TableContainer>
+                      <Table>
+                        <TableBody>
+                          {result.matrix.map((row, rowIndex) => (
+                            <TableRow key={rowIndex}>
+                              {row.map((value, colIndex) => (
+                                <TableCell key={colIndex}>{value}</TableCell>
+                              ))}
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </TableContainer>
                     <p><strong>Weights:</strong> {result.weights.join(', ')}</p>
                     <p><strong>Max Eigenvalue:</strong> {result.max_eigenvalue}</p>
                     <p><strong>Consistency Index (CI):</strong> {result.ci}</p>
                     <p><strong>Consistency Ratio (CR):</strong> {result.cr}</p>
                     <p><strong>Random Index (RI):</strong> {result.ri}</p>
-                  </div>
+                  </Paper>
                 ))}
                 {data.aggregate_result && (
-                  <div style={{ border: '1px solid #ccc', borderRadius: '5px', padding: '10px', marginBottom: '10px' }}>
-                    <h3>Aggregate Results</h3>
+                  <Paper className="p-4 my-4">
+                    <h3 className="text-xl mb-2">Aggregate Results</h3>
                     <p><strong>Aggregate Pairwise Comparison Matrix:</strong></p>
-                    <table style={{ borderCollapse: 'collapse', width: '100%' }}>
-                      <tbody>
-                        {data.aggregate_result.aggregate_matrix.map((row, rowIndex) => (
-                          <tr key={rowIndex}>
-                            {row.map((value, colIndex) => (
-                              <td key={colIndex} style={{ border: '1px solid #ccc', padding: '5px' }}>{value}</td>
-                            ))}
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                    <TableContainer>
+                      <Table>
+                        <TableBody>
+                          {data.aggregate_result.aggregate_matrix.map((row, rowIndex) => (
+                            <TableRow key={rowIndex}>
+                              {row.map((value, colIndex) => (
+                                <TableCell key={colIndex}>{value}</TableCell>
+                              ))}
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </TableContainer>
                     <p><strong>Weights:</strong> {data.aggregate_result.weights.join(', ')}</p>
                     <p><strong>Max Eigenvalue:</strong> {data.aggregate_result.max_eigenvalue}</p>
                     <p><strong>Consistency Index (CI):</strong> {data.aggregate_result.ci}</p>
                     <p><strong>Consistency Ratio (CR):</strong> {data.aggregate_result.cr}</p>
                     <p><strong>Random Index (RI):</strong> {data.aggregate_result.ri}</p>
-                  </div>
+                  </Paper>
                 )}
-                <button onClick={generatePDF} style={{ padding: '10px 20px', fontSize: '16px', cursor: 'pointer', backgroundColor: '#28a745', color: '#fff', border: 'none', borderRadius: '5px' }}>
+                <Button onClick={generatePDF} variant="contained" color="success" className="my-4">
                   Download Report
-                </button>
+                </Button>
               </div>
             )}
           </div>
