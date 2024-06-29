@@ -143,29 +143,36 @@ def save_to_word(results, aggregate_result):
     return doc_path
 
 @app.post("/uploadfile/")
-async def create_upload_file(file: UploadFile = File(...)):
+async def create_upload_files(files: list[UploadFile] = File(...)):
     try:
-        logger.info("File upload initiated")
-        content = await file.read()
-        content_str = content.decode("utf-8")
+        logger.info("Files upload initiated")
+        results_list = []
+        aggregate_results_list = []
 
-        logger.info("Processing file content")
-        results, aggregate_result = process_criteria(content_str)
+        for file in files:
+            content = await file.read()
+            content_str = content.decode("utf-8")
+
+            logger.info(f"Processing file content for {file.filename}")
+            results, aggregate_result = process_criteria(content_str)
+            results_list.extend(results)
+            if aggregate_result:
+                aggregate_results_list.append(aggregate_result)
 
         logger.info("Saving analysis results to Word document")
-        doc_path = save_to_word(results, aggregate_result)
+        doc_path = save_to_word(results_list, aggregate_results_list[0] if aggregate_results_list else None)
 
         response_data = {
-            "message": "File processed successfully",
+            "message": "Files processed successfully",
             "document": doc_path,
-            "results": results,
-            "aggregate_result": aggregate_result
+            "results": results_list,
+            "aggregate_result": aggregate_results_list[0] if aggregate_results_list else None
         }
 
-        logger.info("File processed successfully")
+        logger.info("Files processed successfully")
         return JSONResponse(content=response_data)
     except Exception as e:
-        logger.error(f"Error processing file: {e}", exc_info=True)
+        logger.error(f"Error processing files: {e}", exc_info=True)
         return JSONResponse(content={"message": str(e)}, status_code=500)
 
 if __name__ == "__main__":
