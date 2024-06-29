@@ -4,17 +4,19 @@ from fastapi.middleware.cors import CORSMiddleware
 import pandas as pd
 import numpy as np
 from docx import Document
+import os
 import io
 import logging
+from datetime import datetime
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 app = FastAPI()
 
 # Configure CORS
-origins = [
-    "http://localhost:3000",  # React app
-    "http://localhost:8000",  # API server
-]
-
+origins = ["http://localhost:3000"]
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
@@ -23,14 +25,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-logging.basicConfig(level=logging.INFO)
-
 def calculate_eigenvector(matrix):
     eigenvalues, eigenvectors = np.linalg.eig(matrix)
-    max_eigenvalue = np.max(eigenvalues)
-    max_eigenvector = eigenvectors[:, np.argmax(eigenvalues)]
+    max_eigenvalue = np.max(eigenvalues).real
+    max_eigenvector = eigenvectors[:, np.argmax(eigenvalues)].real
     normalized_vector = max_eigenvector / np.sum(max_eigenvector)
-    normalized_vector = np.real_if_close(normalized_vector, tol=1e-9)
     return max_eigenvalue, normalized_vector
 
 def calculate_consistency(matrix, max_eigenvalue):
@@ -48,19 +47,27 @@ def geometric_mean(matrices):
     return np.power(product_matrix, 1/len(matrices))
 
 def create_matrices(file_content):
+    logger.info("Creating matrices from file content")
     data = pd.read_csv(io.StringIO(file_content), header=None)
-    numeric_data = data.apply(pd.to_numeric, errors='coerce')
-    numeric_data = numeric_data.dropna().reset_index(drop=True)
+    numeric_data = data.apply(pd.to_numeric, errors='coerce').dropna()
+
     num_engineers = numeric_data.shape[0]
-    num_sub_criteria = int(np.sqrt(numeric_data.shape[1] * 2 + 0.25) - 0.5)
     engineer_matrices = {}
 
     for i in range(num_engineers):
         sub_criteria = numeric_data.iloc[i].values
+        num_sub_criteria = int((1 + (1 + 8 * len(sub_criteria))**0.5) / 2)
+
+        if not (num_sub_criteria * (num_sub_criteria - 1) // 2) == len(sub_criteria):
+            logger.error(f"Invalid number of sub-criteria for engineer {i + 1}. The data does not form a valid matrix.")
+            raise ValueError(f"Invalid number of sub-criteria for engineer {i + 1}. The data does not form a valid matrix.")
+
         matrix = np.eye(num_sub_criteria)
         k = 0
         for row in range(num_sub_criteria):
             for col in range(row + 1, num_sub_criteria):
+                if k >= len(sub_criteria):
+                    raise IndexError(f"Index {k} is out of bounds for sub_criteria with length {len(sub_criteria)}")
                 matrix[row, col] = sub_criteria[k]
                 matrix[col, row] = 1 / sub_criteria[k]
                 k += 1
@@ -69,6 +76,7 @@ def create_matrices(file_content):
     return engineer_matrices
 
 def process_criteria(file_content):
+    logger.info("Processing criteria")
     engineer_matrices = create_matrices(file_content)
     consistent_matrices = []
     results = []
@@ -80,11 +88,11 @@ def process_criteria(file_content):
             consistent_matrices.append(matrix)
         results.append({
             'engineer': engineer,
-            'matrix': matrix.tolist(),
-            'weights': weights.tolist(),
-            'max_eigenvalue': max_eigenvalue,
-            'ci': ci,
-            'cr': cr,
+            'matrix': matrix.round(3).tolist(),
+            'weights': weights.round(3).tolist(),
+            'max_eigenvalue': round(max_eigenvalue, 3),
+            'ci': round(ci, 3),
+            'cr': round(cr, 3),
             'ri': ri
         })
 
@@ -93,11 +101,11 @@ def process_criteria(file_content):
         max_eigenvalue, weights = calculate_eigenvector(aggregate_matrix)
         ci, cr, ri = calculate_consistency(aggregate_matrix, max_eigenvalue)
         aggregate_result = {
-            'aggregate_matrix': aggregate_matrix.tolist(),
-            'weights': weights.tolist(),
-            'max_eigenvalue': max_eigenvalue,
-            'ci': ci,
-            'cr': cr,
+            'aggregate_matrix': aggregate_matrix.round(3).tolist(),
+            'weights': weights.round(3).tolist(),
+            'max_eigenvalue': round(max_eigenvalue, 3),
+            'ci': round(ci, 3),
+            'cr': round(cr, 3),
             'ri': ri
         }
     else:
@@ -106,12 +114,13 @@ def process_criteria(file_content):
     return results, aggregate_result
 
 def save_to_word(results, aggregate_result):
+    logger.info("Saving results to Word document")
     doc = Document()
     doc.add_heading('Criteria Analysis', level=1)
 
     for result in results:
         doc.add_heading(result['engineer'], level=2)
-        doc.add_paragraph(f"Pairwise Comparison Matrix:\n{result['matrix']}")
+        doc.add_paragraph(f"Pairwise Comparison Matrix:\n{np.array(result['matrix'])}")
         doc.add_paragraph(f"Weights:\n{result['weights']}")
         doc.add_paragraph(f"Max Eigenvalue: {result['max_eigenvalue']}")
         doc.add_paragraph(f"Consistency Index (CI): {result['ci']}")
@@ -121,33 +130,42 @@ def save_to_word(results, aggregate_result):
 
     if aggregate_result:
         doc.add_heading('Aggregate Results', level=2)
-        doc.add_paragraph(f"Aggregate Pairwise Comparison Matrix:\n{aggregate_result['aggregate_matrix']}")
+        doc.add_paragraph(f"Aggregate Pairwise Comparison Matrix:\n{np.array(aggregate_result['aggregate_matrix'])}")
         doc.add_paragraph(f"Aggregate Weights:\n{aggregate_result['weights']}")
         doc.add_paragraph(f"Aggregate Max Eigenvalue: {aggregate_result['max_eigenvalue']}")
         doc.add_paragraph(f"Aggregate Consistency Index (CI): {aggregate_result['ci']}")
         doc.add_paragraph(f"Aggregate Consistency Ratio (CR): {aggregate_result['cr']}")
         doc.add_paragraph(f"Aggregate Random Index (RI): {aggregate_result['ri']}")
 
-    doc_path = 'criteria_analysis.docx'
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    doc_path = f'criteria_analysis_{timestamp}.docx'
     doc.save(doc_path)
     return doc_path
 
 @app.post("/uploadfile/")
 async def create_upload_file(file: UploadFile = File(...)):
     try:
+        logger.info("File upload initiated")
         content = await file.read()
         content_str = content.decode("utf-8")
+
+        logger.info("Processing file content")
         results, aggregate_result = process_criteria(content_str)
+
+        logger.info("Saving analysis results to Word document")
         doc_path = save_to_word(results, aggregate_result)
+
         response_data = {
             "message": "File processed successfully",
             "document": doc_path,
             "results": results,
             "aggregate_result": aggregate_result
         }
+
+        logger.info("File processed successfully")
         return JSONResponse(content=response_data)
     except Exception as e:
-        logging.error(f"Error processing file: {e}")
+        logger.error(f"Error processing file: {e}", exc_info=True)
         return JSONResponse(content={"message": str(e)}, status_code=500)
 
 if __name__ == "__main__":
